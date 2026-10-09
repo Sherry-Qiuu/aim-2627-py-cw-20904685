@@ -12,6 +12,7 @@
 """
 import json
 from enum import Enum
+from unicodedata import name
 
 
 # ---------------------------------------------------------------------------
@@ -36,13 +37,41 @@ class Facing(Enum):
 # ---------------------------------------------------------------------------
 def hp_ratio(hp, max_hp):
     """TODO(Q1)：血量百分比，返回 0-100 的 int；计算与边界规则见题面 Q1 规范。"""
-    raise NotImplementedError("Q1 hp_ratio：题面 Q1·血量百分比与精度保障")
+    # 纯手搓标识：）如果看到源码的话 就可以看到我的挣扎了。。。   
+    if max_hp <= 0:
+        raise ValueError("最大血量必须大于0")
+    hp_ratio = int(hp/max_hp*100)
+    # 行 但是我想加一个边界判断
+    hp_ratio = max(0, min(100, hp_ratio))
+    # 如果超出边界，要返回边界值，并且自定义报错ps:对的，我想先在这里练个手，说不定后面就自己搓出来了呢
+    if hp_ratio < 0 or hp_ratio > 100:
+        raise ValueError("血量百分比必须在 0-100 之间")
+    if hp < 0:
+        raise ValueError("监测血量小于0")
+    if hp > max_hp:
+        raise ValueError("监测血量大于最大血量")
+
+    return hp_ratio
 
 
 def status_report(name, robot_type, hp, max_hp, battery):
     """TODO(Q1)：一行自检报告字符串；档位判定与逐字符格式见题面 Q1 规范。"""
+    gears = str("OK")
+    if not isinstance(name, str):
+        raise TypeError("name 必须是字符串")
+    if not isinstance(robot_type, str):
+        raise TypeError("robot_type 必须是字符串")
+    if not isinstance(battery, (int, float)):
+        raise TypeError("battery 必须是数字")
+    if battery <30:
+        gears = str("WARNING")
+        if battery <10:
+            gears = str("LOW")
+    status_report = str(f"{name:<10}|{robot_type:^10}|HP {hp_ratio(hp, max_hp):>3}%|BAT {battery:>3}%|{gears}")
+    #hand-made code is too difficult, I make mistake in format for thousands of times QAQ
+    return status_report
     raise NotImplementedError("Q1 status_report：题面 Q1·电量映射与报告格式")
-
+#这里的代码出错：不知道告警阈值具体是多少；直接写钩子可能被判作弊？题面里面真的没有啊。。。。我明天再看看，难道是我脑子不好了
 
 # ---------------------------------------------------------------------------
 # Q2 战斗日志分析（题面 Q2·多源日志解析与统计）
@@ -50,6 +79,255 @@ def status_report(name, robot_type, hp, max_hp, battery):
 def analyze_damage_log(lines):
     """TODO(Q2)：解析混合格式伤害日志，返回固定契约的统计 dict；
     行格式、去重与统计口径见题面 Q2 规范。"""
+    import json
+
+VALID_ARMOR = ("front", "left", "right")
+SENSOR_KEYS = {"F": "front", "L": "left", "R": "right"}
+
+# CPython 3.11+ 默认"字符串->整数"的位数上限。只用作快速剪枝的参考量级，
+# 不参与正确性判定（真正的兜底是 int() 外面的 try）。
+_MAX_INT_DIGITS = 4300
+
+
+# ---------- 基础校验 ----------
+def parse_pos_int(text):
+    """
+    严格正整数：纯 ASCII 数字且 > 0。
+    '07' 合法(=7)；'+5'/'0'/'-3'/'1.5'/全角'１２３' 非法。
+    返回 int 或 None。全程不抛异常。
+    """
+    s = text.strip()
+    if not s or not s.isascii() or not s.isdigit():
+        return None
+    # ★ 快速剪枝：位数超过 int 解析上限必然抛异常 -> 直接判脏，不必尝试转换
+    if len(s) > _MAX_INT_DIGITS:
+        return None
+    try:
+        value = int(s)
+    except (ValueError, OverflowError):     # 兜底
+        return None
+    return value if value > 0 else None
+
+
+def parse_real_int(v):
+    """
+    已经是 Python 对象时的整数校验：真整数且 > 0。
+    bool 是 int 的子类，必须挡掉，否则 damage:true 会混进来。
+    返回 int 或 None。
+    """
+    if isinstance(v, bool) or not isinstance(v, int):
+        return None
+    return v if v > 0 else None
+
+
+# ---------- 两种行的解析（失败一律返回 None，绝不抛异常）----------
+def parse_sensor(line):
+    """传感器行 -> {part: damage}；任何一段非法则整行作废。"""
+    result = {}
+    for seg in line.split(","):
+        if ":" not in seg:
+            return None                    # 空段/缺冒号 -> 整行脏
+        k, v = seg.split(":", 1)           # 只切第一刀，值里再带冒号也不误伤
+        k = k.strip()
+        if k not in SENSOR_KEYS:
+            return None                    # 字母不是 F/L/R -> 整行脏
+        value = parse_pos_int(v)
+        if value is None:
+            return None                    # 值非严格正整数（含超长）-> 整行脏
+        result[SENSOR_KEYS[k]] = value     # 同部位重复出现时后者覆盖
+    return result if result else None
+
+
+def parse_json_line(line):
+    """JSON 行 -> 规范化 dict；非法返回 None。id 可选，出现则必须正整数。"""
+    try:
+        obj = json.loads(line)
+    except (ValueError, TypeError, RecursionError):
+        # ValueError 同时覆盖：非法 JSON 语法；以及超长数字串触发的
+        # "Exceeds the limit ... for integer string conversion"
+        return None
+    if not isinstance(obj, dict):
+        return None                        # 合法但不是对象（如 [1,2]）-> 脏
+
+    armor = obj.get("armor")
+    if armor not in VALID_ARMOR:           # 缺失与非法同一处理
+        return None
+    damage = parse_real_int(obj.get("damage"))
+    if damage is None:                     # 严格正整数
+        return None
+
+    out = {"armor": armor, "damage": damage}
+    if "id" in obj:
+        idv = parse_real_int(obj["id"])
+        if idv is None:
+            return None
+        out["id"] = idv
+    return out
+
+
+# ---------- 主函数 ----------
+def analyze_damage_log(lines):
+    """解析混合格式伤害日志，返回固定契约的统计 dict。
+
+    行格式、去重与统计口径见题面 Q2 规范。
+    返回：{"total": int, "by_armor": {...}, "most_hit": str|None, "avg": float}
+    """
+    # 0) 输入归一：字符串按行拆；列表/元组每个元素算一行；其它转字符串兜底。
+    #    不能无脑 str(lines)：若 lines 本身是列表，str() 会带上方括号和引号，
+    #    整块变成一行脏数据。
+    if isinstance(lines, str):
+        raw_lines = lines.splitlines()
+    elif isinstance(lines, (list, tuple)):
+        raw_lines = []
+        for item in lines:
+            try:                            # 恶意 __str__ 对象也不许炸
+                raw_lines.append(str(item))
+            except Exception:
+                continue
+    else:
+        try:
+            raw_lines = str(lines).splitlines()
+        except Exception:
+            return {"total": 0, "by_armor": {"front": 0, "left": 0, "right": 0},
+                    "most_hit": None, "avg": 0.0}
+
+    # 1) 清洗：去注释 -> 去空白 -> 丢空行，一趟完成
+    #    整行注释切完变空串，被 if text 自然过滤
+    clean = []
+    for raw in raw_lines:
+        text = raw.split("#", 1)[0].strip()
+        if text:
+            clean.append(text)
+
+    # 2) 逐行解析 + 按契约累计
+    by_armor = {"front": 0, "left": 0, "right": 0}   # 三键恒存在
+    total = 0
+    events = 0                                        # 有效事件数（avg 分母）
+    seen_ids = set()                                  # id 去重
+
+    for line in clean:
+        if line.startswith("{"):
+            data = parse_json_line(line)
+            if data is None:
+                continue                              # 脏行：跳过，不计任何统计
+            if "id" in data:
+                if data["id"] in seen_ids:            # 重复 id：只计第一次
+                    continue
+                seen_ids.add(data["id"])
+            events += 1
+            total += data["damage"]
+            by_armor[data["armor"]] += data["damage"]
+        else:
+            data = parse_sensor(line)
+            if data is None:
+                continue
+            events += 1
+            for part, dmg in data.items():
+                total += dmg
+                by_armor[part] += dmg
+
+    # 3) 契约收尾
+    most_hit = max(by_armor, key=by_armor.get) if events else None
+    if events:
+        try:
+            # ★ total 可能是天文数字整数，total / events 会触发
+            #   OverflowError: integer division result too large for a float
+            avg = round(total / events, 2)
+        except (OverflowError, ValueError):
+            avg = 0.0                      # 兜底：无法表示为 float 则按契约给 0.0
+    else:
+        avg = 0.0
+    return {"total": total, "by_armor": by_armor, "most_hit": most_hit, "avg": avg}
+
+
+# ---------- 自测 ----------
+if __name__ == "__main__":
+    # 主样例：5 个有效事件，其余全是脏行
+    sample = "\n".join([
+        "F:32,L:5,R:12",
+        "F:100          # 只有 front",
+        "",
+        "# 整行注释",
+        '{"armor": "front", "damage": 30, "id": 7}',
+        '{"armor": "left", "damage": 12}',
+        '{"armor": "front", "damage": 99, "id": 7}   # 重复 id，忽略',
+        "F:32,X:5",                                  # 脏：X 非法
+        '{"armor": "up", "damage": 1}',              # 脏：armor 非法
+        '{"armor": "front"}',                        # 脏：缺 damage
+        '{"armor": "front", "damage": 0}',           # 脏：damage 非严格正
+        '{"armor": "front", "damage": -5}',          # 脏：负数
+        '{"armor": "front", "damage": 30.5}',        # 脏：浮点
+        '{"armor": "front", "damage": true}',        # 脏：bool 不是真整数
+        "L:7,R:9   # 行内注释",
+        "F:abc",                                     # 脏：值非数字
+        "F:0",                                       # 脏：0 非严格正
+        "f:32",                                      # 脏：小写（题面为 F/L/R 严格口径）
+        "F:32,,L:5",                                 # 脏：空段违反"每段必须是字母:正整数"
+    ])
+    r = analyze_damage_log(sample)
+    print("主样例:", r)
+    assert r == {
+        "total": 207,
+        "by_armor": {"front": 162, "left": 24, "right": 21},
+        "most_hit": "front",
+        "avg": 41.4,
+    }, r
+
+    # 空日志
+    r0 = analyze_damage_log("")
+    print("空日志:", r0)
+    assert r0 == {"total": 0, "by_armor": {"front": 0, "left": 0, "right": 0},
+                  "most_hit": None, "avg": 0.0}, r0
+
+    # 平局：front 和 left 同为 5，取 front/left/right 顺序里先到的 front
+    rt = analyze_damage_log("F:5,L:5")
+    print("平局:", rt)
+    assert rt["most_hit"] == "front"
+
+    # 列表输入 + id 去重
+    rl = analyze_damage_log([
+        "F:32",
+        '{"armor": "front", "damage": 10, "id": 7}',
+        '{"armor": "front", "damage": 10, "id": 7}',
+    ])
+    print("列表输入:", rl)
+    assert rl == {"total": 42, "by_armor": {"front": 42, "left": 0, "right": 0},
+                  "most_hit": "front", "avg": 21.0}, rl
+
+    # ★ 超长数字炸弹（v1 会崩，v2 判脏跳过）—— 本轮加固的核心目标
+    r_bomb1 = analyze_damage_log("F:" + "9" * 100000)
+    print("超长传感器值:", r_bomb1)
+    assert r_bomb1["total"] == 0 and r_bomb1["most_hit"] is None, r_bomb1
+
+    r_bomb2 = analyze_damage_log('{"armor": "front", "damage": ' + "9" * 100000 + "}")
+    print("超长 JSON 值:", r_bomb2)
+    assert r_bomb2["total"] == 0, r_bomb2
+
+    r_bomb3 = analyze_damage_log("F:" + "9" * 5000)
+    print("超 4300 位传感器值:", r_bomb3)
+    assert r_bomb3["total"] == 0, r_bomb3
+
+    # 边界：刚好 4300 位（合法位数）——会被接受为巨大正整数
+    r_edge = analyze_damage_log("F:" + "9" * 4300)
+    print("4300 位边界:", "接受为合法值" if r_edge["total"] > 0 else "判脏")
+
+    # 其他离谱输入也不许炸
+    analyze_damage_log(None)
+    analyze_damage_log(12345)
+    analyze_damage_log({"x": 1})
+
+    class Evil:
+        def __str__(self):
+            raise RuntimeError("boom")
+
+    analyze_damage_log([Evil()])          # 恶意 __str__ 也不炸
+    print("恶意 __str__ 对象: 未抛异常 ✓")
+
+    print("\n全部自测通过 ✓")
+            
+            #我坚持不住了哈哈，不会了啊怎么办。自动补全的东西我感觉我都没学过，读起来又像是对的。。。没招了
+    
+    
     raise NotImplementedError("Q2 analyze_damage_log：题面 Q2·多源日志解析与统计")
 
 
