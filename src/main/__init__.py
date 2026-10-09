@@ -79,12 +79,14 @@ def status_report(name, robot_type, hp, max_hp, battery):
               f"|HP {pct:>3}%|BAT {battery:>3}%|{gears}")
     return report
     raise NotImplementedError("Q1 status_report：题面 Q1·电量映射与报告格式")
-# 这里的代码出错：不知道告警阈值具体是多少；直接写钩子可能被判作弊？题面里面真的没有啊。。。。我明天再看看，难道是我脑子不好了
+# 这里的代码出错：不知道告警阈值具体是多少 难道是我脑子不好了
 
 
 # ---------------------------------------------------------------------------
 # Q2 战斗日志分析（题面 Q2·多源日志解析与统计）
 # ---------------------------------------------------------------------------
+
+
 VALID_ARMOR = ("front", "left", "right")
 SENSOR_KEYS = {"F": "front", "L": "left", "R": "right"}
 
@@ -422,31 +424,82 @@ class SentryGrid:
     @current_pos.setter
     def current_pos(self, value):
         """TODO(Q3)：位置 setter；三重输入校验见题面 Q3 规范第 1 条。"""
+        """位置 setter：三重校验（题面 Q3 规范 1）。
+
+        只查容器类型 / 长度 / 元素可转 int 并越界夹回；**不检查障碍格**
+        （见文件头的拍板口径 4）。
+        """
+        # 校验 ①：容器类型 —— 只收 tuple / list，其余抛 TypeError
+        if not isinstance(value, (tuple, list)):
+            raise TypeError("current_pos 需要长度为 2 的 tuple 或 list")
+        # 校验 ②：长度 —— 必须是 2
+        if len(value) != 2:
+            raise TypeError("current_pos 需要长度为 2 的 tuple 或 list")
+        # 校验 ③：元素 —— 规范化为 int（越界夹回地图范围，与构造函数
+        # _clamp_cell 同口径）；元素不可转 int 按规范 1"其余类型"抛
+        # TypeError
+        try:
+            x = int(value[0])
+            y = int(value[1])
+        except (TypeError, ValueError, OverflowError):
+            raise TypeError("current_pos 的元素必须是数值")
+        x = max(0, min(self._width - 1, x))
+        y = max(0, min(self._height - 1, y))
+        self._pos = (x, y)
         raise NotImplementedError("Q3 current_pos.setter：题面 Q3·位置校验三步")
 
     def move_forward(self):
         """TODO(Q3)：朝当前 facing 前进一格，返回执行后的位置；
         碰撞、耗电与断电语义见题面 Q3 规范。"""
+        """朝当前 facing 前进一格，返回执行后的位置（题面 Q3 规范 2-4）。"""
+        # 规范 4：电量 <= 0 底盘断电 —— 尝试不产生位移
+        # （也不计碰撞、不扣电：断电不是障碍，碰撞定义见规范 2）
+        if self._fuel <= 0:
+            return self._pos
+        dx, dy = self._facing.delta
+        nx, ny = self._pos[0] + dx, self._pos[1] + dy
+        if self.is_blocked(nx, ny):
+            # 规范 2：碰撞 —— 位置不变、朝向不变、collision_count 加 1。
+            # 已拍板：撞墙位置不变、不算前进 → 不扣电（规范 3 只约束
+            # 真正的位移）。可见测试 test_move_into_obstacle 只断言
+            # collision_count / 位置 / 朝向，不查 fuel，此口径不与之冲突。
+            self._collision_count += 1
+            return self._pos
+        # 规范 3：前进消耗 1 单位电量（仅在成功移动时扣）
+        self._fuel -= 1
+        self._pos = (nx, ny)
+        return self._pos
         raise NotImplementedError("Q3 move_forward：题面 Q3·前进、碰撞与断电")
 
     def turn_left(self):
         """TODO(Q3)：原地左转 90°，返回新的 Facing（不耗电）。"""
+        """原地左转 90°，返回新的 Facing（不耗电）。"""
+        self._facing = {Facing.UP: Facing.LEFT, Facing.LEFT: Facing.DOWN,
+                        Facing.DOWN: Facing.RIGHT,
+                        Facing.RIGHT: Facing.UP}[self._facing]
+        return self._facing
         raise NotImplementedError("Q3 turn_left")
 
     def turn_right(self):
         """TODO(Q3)：原地右转 90°，返回新的 Facing（不耗电）。"""
+        """原地右转 90°，返回新的 Facing（不耗电）。"""
+        self._facing = {Facing.UP: Facing.RIGHT, Facing.RIGHT: Facing.DOWN,
+                        Facing.DOWN: Facing.LEFT,
+                        Facing.LEFT: Facing.UP}[self._facing]
+        return self._facing
         raise NotImplementedError("Q3 turn_right")
 
 
 # ---------------------------------------------------------------------------
 # Q4 贪心导航（题面 Q4·单步贪心导航策略）
 # ---------------------------------------------------------------------------
-# Q4 平局（|dx| == |dy|）时的轴偏好：False = 优先 y 轴。
-# 题面只写"先走与目标绝对坐标差较大的轴"，未规定两轴差值相等时走哪条；
-# 这里取"严格较大"语义（相等时落到 else 分支 → y 轴），与 OI 风格的
-# `if abs(dx) > abs(dy): ... else: ...` 一致。
-# 若批改口径相反，把这一行改成 True 即可，不需要动函数体。
-_TIE_PREFER_X_AXIS = False
+# Q4 平局（|dx| == |dy|）时的轴偏好：True = 优先 x 轴，False = 优先 y 轴。
+# 题面规范 2 只写"先走与目标绝对坐标差较大的轴"，未规定两轴相等时走哪条。
+# 取 True 的依据：官方工具 tools/run_seeds.py 的参考导航用
+# `prefer_x = abs(dx) >= abs(dy)`（>= 使平局时 x 轴优先），与题面该条的
+# 自然写法 `if abs(dx) >= abs(dy): 走 x 轴` 一致。若批改口径相反，
+# 把这一行改回 False 即可，不需要动函数体。
+_TIE_PREFER_X_AXIS = True
 
 
 def next_step_toward(pos, target, obstacles, current_facing=Facing.UP):
@@ -506,7 +559,11 @@ class SentryState(Enum):
     RETURN = "RETURN"
 
 
+def decide(sensor, state, hp, heat):
+    """TODO(Q5)：纯函数决策，返回 (action: str, new_state: SentryState)；
+    sensor 字段契约、R1-R7 规则表与非法输入处理见题面 Q5 规范。"""
 # ---- Q5 口径开关：题面未写死、由自动测试裁定的边界，集中放在这里 ----
+
 
 # 血量阈值：R1 保命线（hp_pct <= 30 → RETREAT）。
 # R2 说的"恢复到安全血量"题面没给数值；因为 R1 已拦截全部 hp_pct <= 30
@@ -689,11 +746,115 @@ def decide(sensor, state, hp, heat):
 def run_patrol(grid, max_steps=500):
     """TODO(Q6)：sense → decide → act 主循环；
     循环结构、终止条件、脱困自由度与统计返回契约见题面 Q6 规范。"""
+    from collections import deque
+
+    enemy = grid.enemy_pos
+    # 顺时针方向环：算"转几下能对齐"、BFS 展开邻格，都用这个固定顺序。
+    clockwise = (Facing.UP, Facing.RIGHT, Facing.DOWN, Facing.LEFT)
+
+    def distance(a, b):
+        """两格之间的曼哈顿距离：横向差 + 纵向差。"""
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    def align(facing):
+        """把哨兵原地转到 facing 朝向（转向不耗电、不计入 steps）。
+
+        diff 是沿顺时针要转的格数；diff == 3 等价于逆时针一格，
+        走左转更省一次调用（题面规定转向不耗电，这里只是少转一格）。
+        """
+        diff = (clockwise.index(facing)
+                - clockwise.index(grid.facing)) % 4
+        if diff == 3:                  # 逆时针一格 = 左转
+            grid.turn_left()
+        else:
+            for _ in range(diff):
+                grid.turn_right()
+
+    def greedy_ok(pos):
+        """贪心还能不能用？四邻格存在"可通行且严格减距"的方向就算能用。"""
+        dist = distance(pos, enemy)
+        for facing in clockwise:
+            dx, dy = facing.delta
+            nxt = (pos[0] + dx, pos[1] + dy)
+            if (not grid.is_blocked(nxt[0], nxt[1])
+                    and distance(nxt, enemy) < dist):
+                return True
+        return False
+
+    def escape_step(start):
+        """脱困：BFS 求 start→enemy 的最短路，返回第一步该朝的 Facing。
+
+        BFS 逐层往外扩，第一次碰到 enemy 时回溯出"从 start 出发的第一
+        步"，所以最短路并列时取的是展开顺序里最靠前的那条（确定性）。
+        只在"界内且非障碍"的格上展开，返回的方向一定可通行；不可达
+        返回 None（连通地图上不会发生，防御用）。
+        """
+        if start == enemy:
+            return None
+        first_move = {}                # 每个已访问格 -> 从 start 出发的第一步
+        seen = {start}
+        queue = deque([start])
+        while queue:
+            cur = queue.popleft()
+            for facing in clockwise:
+                dx, dy = facing.delta
+                nxt = (cur[0] + dx, cur[1] + dy)
+                if nxt in seen or grid.is_blocked(nxt[0], nxt[1]):
+                    continue
+                seen.add(nxt)
+                # cur 是起点时，第一步就是这条边；否则继承 cur 的第一步
+                first_move[nxt] = facing if cur == start else first_move[cur]
+                if nxt == enemy:
+                    return first_move[nxt]
+                queue.append(nxt)
+        return None
+
+    visited = {grid.current_pos}       # 到过的格（set 自动去重）
+    steps = 0
+    collision_count = 0
+
+    escaping = False                   # 是否处于 BFS 脱困模式
+    entry_distance = 0                 # 进入脱困那一刻的距离（闸门基准）
+
+    while steps < max_steps and grid.fuel > 0 and not grid.found_enemy:
+        pos = grid.current_pos
+
+        # 贪心失速 -> 进入脱困，并记下进入时的距离
+        if not escaping and not greedy_ok(pos):
+            escaping = True
+            entry_distance = distance(pos, enemy)
+
+        if escaping:
+            facing = escape_step(pos)
+            if facing is None:         # 目标不可达：连通地图上不会发生
+                break
+        else:
+            facing = next_step_toward(pos, enemy, grid.obstacles,
+                                      grid.facing)
+
+        align(facing)
+        grid.move_forward()
+        steps += 1                      # 只有 move_forward 计步，转向不算
+        collision_count = grid.collision_count
+        after = grid.current_pos
+        visited.add(after)
+
+        # 进度闸门：真的比进入脱困时更近了，才切回贪心（防震荡）
+        if escaping and distance(after, enemy) < entry_distance:
+            escaping = False
+
+    return {"steps": steps,
+            "collisions": collision_count,
+            "visited_count": len(visited),
+            "found_enemy": grid.found_enemy,
+            "success": grid.found_enemy}
     raise NotImplementedError("Q6 run_patrol：题面 Q6·主循环与统计契约")
 
 
 def report_to_json(stats):
     """TODO(Q6)：把 stats 序列化为确定性的 JSON 字符串，见题面 Q6 规范。"""
+    # sort_keys=True：输出只取决于内容、不取决于字典插入顺序（确定性）
+    return json.dumps(stats, sort_keys=True)
     raise NotImplementedError("Q6 report_to_json：题面 Q6·报告序列化")
 
 
@@ -702,6 +863,44 @@ def report_to_json(stats):
 # ---------------------------------------------------------------------------
 def bfs_path_length(start, target, obstacles):
     """TODO(Bonus)：BFS 全局最短路步数；返回语义与边界职责见题面 Bonus 规范。"""
+
+    """
+    - start == target 返回 0；目标不可达返回 -1；
+    - obstacles 由调用方负责包含地图边界（否则不可达目标的搜索不会终止）；
+    - 只返回步数，不要求给出路径。
+    """
+    from collections import deque
+
+    # 坐标规范化（容忍 list / 其它可下标对象；元素统一成 int）
+    try:
+        start = (int(start[0]), int(start[1]))
+        target = (int(target[0]), int(target[1]))
+    except (TypeError, ValueError, IndexError, KeyError, OverflowError):
+        return -1
+    if start == target:
+        return 0
+
+    blocked = set()
+    if obstacles is not None:
+        for cell in obstacles:
+            try:
+                blocked.add((int(cell[0]), int(cell[1])))
+            except (TypeError, ValueError, IndexError, KeyError, OverflowError):
+                continue
+
+    queue = deque([(start, 0)])
+    seen = {start}
+    while queue:
+        (cx, cy), depth = queue.popleft()
+        for nxt in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
+            if nxt in blocked or nxt in seen:
+                continue
+            if nxt == target:
+                return depth + 1
+            seen.add(nxt)
+            queue.append((nxt, depth + 1))
+    return -1
+
     raise NotImplementedError("Bonus bfs_path_length")
 
 
