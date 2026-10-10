@@ -94,4 +94,38 @@ CI 只允许修改 `src/main/**`、`README.md` 与 `.agent-sessions/**`（AI 会
 
 Additionally，这个题面怎么说我就怎么做。
 
+**④AI 会话归档说明（本地环境）：**
+
+本机 WorkBuddy 5.6.2 写出的会话文件，首条记录 `type` 是 `session-meta`（连字符），
+而 AgentLedger v0.1.5 的适配器只认 `session_meta`（下划线），导致官方钩子认不出会话
+（`Project session files found: 0`）。为不篡改第三方工具，本仓库另建了一条本地归档通道：
+
+- 归档产物：`.agent-sessions/bundles/*.jsonl`（会话原文）+ `.agent-sessions/state.json`（指纹），
+  均已随提交入库，`git push` 后远端可见；
+- 生成器（**刻意放在仓库外，不污染 CI 白名单**）：
+  `~/.workbuddy/wb-archive-helper/archive_sessions.py`
+- 钩子：`.git/hooks/post-commit`（调度器，先跑 AgentLedger，再跑本地脚本）；
+  AgentLedger 原钩子备份为同目录 `post-commit.agentledger.bak`。
+
+**恢复方法（若钩子被 `pre-commit install` 覆盖，或换了电脑）：**
+
+1. 确认脚本存在：`~/.workbuddy/wb-archive-helper/archive_sessions.py`；若丢失，
+   逻辑说明见本节，或从任一历史提交中的 `.agent-sessions/state.json` 元信息确认配置。
+2. 重写 `.git/hooks/post-commit`，内容为：
+
+```sh
+#!/bin/sh
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$HERE/../.." && pwd)"
+[ -f "$HERE/post-commit.agentledger.bak" ] && sh "$HERE/post-commit.agentledger.bak" "$@" || true
+HELPER="$HOME/.workbuddy/wb-archive-helper/archive_sessions.py"
+PY="$ROOT/.venv/Scripts/python.exe"
+[ -x "$PY" ] || PY="$(command -v python || command -v python3)"
+[ -n "$PY" ] && [ -f "$HELPER" ] && AI_CW_REPO="$ROOT" "$PY" "$HELPER" --repo "$ROOT" || true
+exit 0
+```
+
+3. `chmod +x .git/hooks/post-commit`，然后手动验证：
+   `sh .git/hooks/post-commit`，看到 `归属本仓库的会话：N 个` 即恢复成功。
+
 Finally，祝生活愉快。
