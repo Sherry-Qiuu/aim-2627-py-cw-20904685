@@ -60,26 +60,29 @@ def hp_ratio(hp, max_hp):
 
 def status_report(name, robot_type, hp, max_hp, battery):
     """TODO(Q1)：一行自检报告字符串；档位判定与逐字符格式见题面 Q1 规范。"""
-    gears = str("OK")
+    # 题面 Q1 规范只规定"一行报告 str"的格式，未授权对任何输入抛异常，
+    # 故对字段做防御式归一、绝不 raise（与 hp_ratio 同口径）：
+    #   - name / robot_type 非字符串 -> 转 str（保证 {:<10}/{ :^10} 可格式化）；
+    #   - battery 非数值 -> 按 0 处理。
     if not isinstance(name, str):
-        raise TypeError("name 必须是字符串")
+        name = str(name)
     if not isinstance(robot_type, str):
-        raise TypeError("robot_type 必须是字符串")
-    if not isinstance(battery, (int, float)):
-        raise TypeError("battery 必须是数字")
+        robot_type = str(robot_type)
+    if isinstance(battery, bool) or not isinstance(battery, (int, float)):
+        battery = 0
 
     pct = hp_ratio(hp, max_hp)
-    if battery > 30:
+    # 电量按规范模板 {电量:>3} 渲染：先取整保证 3 字符对齐（float 会破坏对齐）。
+    bat = int(battery)
+    if bat > 30:
         gears = "OK"
-    elif battery > 10:
+    elif bat > 10:
         gears = "WARNING"
     else:
         gears = "LOW"
 
-    report = (f"{name:<10}|{robot_type:^10}"
-              f"|HP {pct:>3}%|BAT {battery:>3}%|{gears}")
-    return report
-# 这里的代码出错：不知道告警阈值具体是多少 难道是我脑子不好了
+    return (f"{name:<10}|{robot_type:^10}"
+            f"|HP {pct:>3}%|BAT {bat:>3}%|{gears}")
 
 
 # ---------------------------------------------------------------------------
