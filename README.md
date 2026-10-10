@@ -94,6 +94,8 @@ CI 只允许修改 `src/main/**`、`README.md` 与 `.agent-sessions/**`（AI 会
 
 Additionally，这个题面怎么说我就怎么做。
 
+> 以下内容由AI生成
+
 **④AI 会话归档说明（本地环境）：**
 
 本机 WorkBuddy 5.6.2 写出的会话文件，首条记录 `type` 是 `session-meta`（连字符），
