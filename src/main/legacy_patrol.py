@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# aim-py-cw-known# -*- coding: utf-8 -*-
 """旧版巡逻统计模块（2526 赛季遗留）—— Q7：昨天还能跑。
 
 背景：本模块从上一届的巡逻系统原样迁移，上周还"能跑"。
@@ -11,6 +11,14 @@
 3. 在你的 README 里逐条写明：错在哪、你是怎么定位到的。
 
 提示：不要迷信 git log 里的"修复"——有一件事被越修越错了。
+
+修复点用 # FIX-1 .. # FIX-6 就地标注（详见 Q7_修复说明.md）：
+  FIX-1 total_route_meters 单位错误（cm 当 m 返回）
+  FIX-2 calibrate 无正样本时 baseline=None 崩溃
+  FIX-3 summarize_events 边界 < 应为 <=
+  FIX-4 log 可变默认参数 history=[]
+  FIX-5 run_legacy_sim 轮号不自增
+  FIX-6 run_legacy_sim 终止条件写反
 """
 
 # ---------------------------------------------------------------------------
@@ -27,10 +35,12 @@ def segment_length_cm(p1, p2):
 def total_route_meters(points):
     """整条巡逻路线的长度，单位：米。
     points 为检查点序列 [(x, y), ...]，至少两个点。"""
-    distance_in_meters = 0
+    distance_cm = 0
+    # FIX-1：segment_length_cm 返回"厘米"，本函数契约是"米"，
+    # 原代码把厘米数直接当米返回（没有除以 100）。
     for i in range(len(points) - 1):
-        distance_in_meters += segment_length_cm(points[i], points[i + 1])
-    return distance_in_meters
+        distance_cm += segment_length_cm(points[i], points[i + 1])
+    return distance_cm // 100
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +69,10 @@ def calibrate(samples):
     """以第一个正样本为基线计算累计漂移：sum(s - baseline)。
     样本为空或没有正样本时，漂移为 0。"""
     baseline = first_positive(samples)
+    # FIX-2：没有正样本时 baseline 是 None；原代码继续执行 s - None，
+    # 会抛 TypeError。契约要求此时漂移为 0。
+    if baseline is None:
+        return 0
     drift = 0
     for s in samples:
         drift += s - baseline
@@ -75,15 +89,21 @@ def summarize_events(events, max_id):
     used = 0
     steps = 0
     for e in events:
-        if e["id"] < max_id:
+        # FIX-3：契约是"不超过 max_id"，即 id <= max_id；
+        # 原代码写 id < max_id，会漏掉恰好等于 max_id 的事件。
+        if e["id"] <= max_id:
             used += 1
             steps += e["move"] + calibrate(e["samples"])
     return {"events": used, "steps": steps}
 
 
-def log(message, history=[]):
+def log(message, history=None):
     """向历史追加一条日志并返回整个历史列表。
     不显式传入 history 时，每次调用都从空历史开始。"""
+    # FIX-4：原签名 history=[] 是可变默认参数，只求值一次并被所有调用
+    # 共享，导致"不显式传入时每次从空历史开始"被破坏。
+    if history is None:
+        history = []
     history.append(message)
     return history
 
@@ -109,6 +129,11 @@ def run_legacy_sim(rounds, stamina_start=100):
         if round_ >= 3:
             stamina -= 5
         trace.append((round_, stamina))
-        if stamina > 20:
+        # FIX-5：round_ 原本从不自增，while 条件恒真 -> 死循环，
+        # 且 trace 里的轮号永远是 0、轮数也数不出来。
+        round_ += 1
+        # FIX-6：终止条件写反了——原代码是 "stamina > 20 才 break"，
+        # 契约是"体力 <= 20 时终止"。
+        if stamina <= 20:
             break
     return {"rounds": len(trace), "stamina": stamina, "trace": trace}
