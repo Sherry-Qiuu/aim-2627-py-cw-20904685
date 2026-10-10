@@ -129,6 +129,19 @@ def parse_real_int(v):
     return v if v > 0 else None
 
 
+def parse_id(v):
+    """
+    id 字段校验（与 damage 的"严格正整数"口径**解耦**）。
+    id 只是去重键，题面规范 6 未规定其取值域，故接受任意真整数——
+    含 0 与负数（id=0 不算脏行）。仍拒绝 bool / 浮点 / 字符串 / null 等
+    非整数类型：它们不是合理的去重键，且 bool 是 int 子类需单独挡掉。
+    返回 int 或 None（None 表示该 id 字段非法 -> 整行判脏）。
+    """
+    if isinstance(v, bool) or not isinstance(v, int):
+        return None
+    return v
+
+
 # ---------- 两种行的解析（失败一律返回 None，绝不抛异常）----------
 def parse_sensor(line):
     """传感器行 -> {part: damage}；任何一段非法则整行作废。"""
@@ -148,7 +161,7 @@ def parse_sensor(line):
 
 
 def parse_json_line(line):
-    """JSON 行 -> 规范化 dict；非法返回 None。id 可选，出现则必须正整数。"""
+    """JSON 行 -> 规范化 dict；非法返回 None。id 可选，出现则须为真整数。"""
     try:
         obj = json.loads(line)
     except (ValueError, TypeError, RecursionError):
@@ -167,8 +180,10 @@ def parse_json_line(line):
 
     out = {"armor": armor, "damage": damage}
     if "id" in obj:
-        idv = parse_real_int(obj["id"])
-        if idv is None:
+        # id 与 damage 解耦：id 只需是可哈希的真整数（0 合法），
+        # 不再套用 damage 的"严格正整数"标准。
+        idv = parse_id(obj["id"])
+        if idv is None:                    # 非整数类型（字符串/浮点/null/bool）-> 脏
             return None
         out["id"] = idv
     return out
