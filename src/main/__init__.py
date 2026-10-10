@@ -37,24 +37,25 @@ class Facing(Enum):
 # ---------------------------------------------------------------------------
 def hp_ratio(hp, max_hp):
     """TODO(Q1)：血量百分比，返回 0-100 的 int；计算与边界规则见题面 Q1 规范。"""
-    # 纯手搓标识here
-    if max_hp <= 0:
-        raise ValueError("最大血量必须大于0")
-    hp_ratio = int(hp / max_hp * 100)
-    # 行 但是我想加一个边界判断
-    hp_ratio = max(0, min(100, hp_ratio))
-    # 如果超出边界，要返回边界值，并且自定义报错
-    # （ps: 对的，我想先在这里练个手，说不定后面就自己搓出来了呢）
-    # 我回来了：搓不出来
-    if hp_ratio < 0 or hp_ratio > 100:
-        raise ValueError("血量百分比必须在 0-100 之间")
-    if hp < 0:
-        raise ValueError("监测血量小于0")
-    if hp > max_hp:
-        raise ValueError("监测血量大于最大血量")
-
-    return hp_ratio
-    raise NotImplementedError("Q1 hp_ratio：题面 Q1·血量百分比与精度保障")
+    # 规范 1 只要求"返回 0-100 的 int"，未授权对任何输入抛异常，
+    # 故全程防御式归一、绝不 raise：
+    #   - max_hp 非法（None / 非数值 / <=0）按 100 兜底 —— 与本文件 Q5
+    #     _q5_max_hp 的既有口径一致（等价于把 hp 直接当百分比）；
+    #   - hp 非法（None / 非数值）按 0 处理 —— 与 Q5 _q5_hp_pct 同口径；
+    #   - 越界 hp（负值 / 超过 max_hp）经比例夹回 0 / 100（clamp），
+    #     与 SentryGrid._clamp_cell 的"越界夹回"表述一致。
+    try:
+        mh = int(max_hp)
+    except (TypeError, ValueError, OverflowError):
+        mh = 100
+    if mh <= 0:
+        mh = 100
+    try:
+        hv = int(hp)
+    except (TypeError, ValueError, OverflowError):
+        hv = 0
+    # 整数路径避免浮点精度误差（如 hp/max_hp*100 恰好落在边界上的情况）
+    return max(0, min(100, hv * 100 // mh))
 
 
 def status_report(name, robot_type, hp, max_hp, battery):
@@ -78,7 +79,6 @@ def status_report(name, robot_type, hp, max_hp, battery):
     report = (f"{name:<10}|{robot_type:^10}"
               f"|HP {pct:>3}%|BAT {battery:>3}%|{gears}")
     return report
-    raise NotImplementedError("Q1 status_report：题面 Q1·电量映射与报告格式")
 # 这里的代码出错：不知道告警阈值具体是多少 难道是我脑子不好了
 
 
@@ -334,8 +334,6 @@ if __name__ == "__main__":
 
     # 我坚持不住了哈哈，不会了啊怎么办。自动补全的东西我感觉我都没学过，读起来又像是对的。。。没招了
 
-    raise NotImplementedError("Q2 analyze_damage_log：题面 Q2·多源日志解析与统计")
-
 
 # ---------------------------------------------------------------------------
 # Q3 SentryGrid（题面 Q3·载体物理规则）
@@ -364,7 +362,9 @@ class SentryGrid:
         self._facing = facing
         self._fuel = int(fuel)
         self._collision_count = 0
-        self._pos = self._clamp_cell(start_pos)
+        # 复用 current_pos 的 setter：初始位置与后续赋值走同一套校验（题面 Q3 规范 1）。
+        # 会触发 TypeError（元素不可转 int）或越界夹回；start_pos 落在障碍上仍单独拦截。
+        self.current_pos = start_pos
         if self._pos in self._obstacles:
             raise ValueError("start_pos 不能位于障碍物上")
 
@@ -446,7 +446,6 @@ class SentryGrid:
         x = max(0, min(self._width - 1, x))
         y = max(0, min(self._height - 1, y))
         self._pos = (x, y)
-        raise NotImplementedError("Q3 current_pos.setter：题面 Q3·位置校验三步")
 
     def move_forward(self):
         """TODO(Q3)：朝当前 facing 前进一格，返回执行后的位置；
@@ -469,7 +468,6 @@ class SentryGrid:
         self._fuel -= 1
         self._pos = (nx, ny)
         return self._pos
-        raise NotImplementedError("Q3 move_forward：题面 Q3·前进、碰撞与断电")
 
     def turn_left(self):
         """TODO(Q3)：原地左转 90°，返回新的 Facing（不耗电）。"""
@@ -478,7 +476,6 @@ class SentryGrid:
                         Facing.DOWN: Facing.RIGHT,
                         Facing.RIGHT: Facing.UP}[self._facing]
         return self._facing
-        raise NotImplementedError("Q3 turn_left")
 
     def turn_right(self):
         """TODO(Q3)：原地右转 90°，返回新的 Facing（不耗电）。"""
@@ -487,7 +484,6 @@ class SentryGrid:
                         Facing.DOWN: Facing.LEFT,
                         Facing.LEFT: Facing.UP}[self._facing]
         return self._facing
-        raise NotImplementedError("Q3 turn_right")
 
 
 # ---------------------------------------------------------------------------
@@ -542,8 +538,6 @@ def next_step_toward(pos, target, obstacles, current_facing=Facing.UP):
     if y_ok:
         return y_dir
     return current_facing
-
-    raise NotImplementedError("Q4 next_step_toward：题面 Q4·贪心策略与回退")
 
 
 # ---------------------------------------------------------------------------
@@ -737,8 +731,6 @@ def decide(sensor, state, hp, heat):
         return ("PATROL_MOVE", SentryState.PATROL)
     return ("SCAN", SentryState.SUSPECT)
 
-    raise NotImplementedError("Q5 decide：题面 Q5·决策规则表 R1-R7")
-
 
 # ---------------------------------------------------------------------------
 # Q6 巡逻任务（题面 Q6·巡逻契约与验收阈值）
@@ -848,14 +840,12 @@ def run_patrol(grid, max_steps=500):
             "visited_count": len(visited),
             "found_enemy": grid.found_enemy,
             "success": grid.found_enemy}
-    raise NotImplementedError("Q6 run_patrol：题面 Q6·主循环与统计契约")
 
 
 def report_to_json(stats):
     """TODO(Q6)：把 stats 序列化为确定性的 JSON 字符串，见题面 Q6 规范。"""
     # sort_keys=True：输出只取决于内容、不取决于字典插入顺序（确定性）
     return json.dumps(stats, sort_keys=True)
-    raise NotImplementedError("Q6 report_to_json：题面 Q6·报告序列化")
 
 
 # ---------------------------------------------------------------------------
@@ -900,8 +890,6 @@ def bfs_path_length(start, target, obstacles):
             seen.add(nxt)
             queue.append((nxt, depth + 1))
     return -1
-
-    raise NotImplementedError("Bonus bfs_path_length")
 
 
 # ---------------------------------------------------------------------------
