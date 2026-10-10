@@ -3,10 +3,10 @@
   "note": "本地归档实现：适配 WorkBuddy 5.6.2 的 session-meta 首记录格式，绕过 AgentLedger v0.1.5 的格式不兼容。",
   "sessions": {
     "969ce9aa-5676-432e-8631-146ad24ac119": {
-      "archived_at": "2026-10-10T12:11:58.007413+00:00",
+      "archived_at": "2026-10-10T12:31:49.885378+00:00",
       "archived_path": ".agent-sessions/bundles/969ce9aa-5676-432e-8631-146ad24ac119.jsonl",
-      "sha256": "a9f8741aed58835cfcd5f14160417ae713c2830b6534c439b603ef11ffe656b7",
-      "size": 1681243,
+      "sha256": "f9bab56cbd736ae57ea52abb774b7e3707ea068a89bb523d4061b79bbe5ad799",
+      "size": 1765464,
       "source": "C:\\Users\\biysq6\\.workbuddy\\projects\\c-Users-biysq6-Downloads-AIM-aim-2627-py-cw-20904685\\969ce9aa-5676-432e-8631-146ad24ac119.jsonl"
     },
     "b06ceeb9-b4cb-4254-a28c-ddd9e537b96d": {
